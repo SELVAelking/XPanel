@@ -3057,8 +3057,7 @@ def force_check_sms():
         print(traceback.format_exc())
         return jsonify({'success': False, 'message': str(e)})
 
-# MAIN ENTRY POINT
-
+# MAIN ENTRY POIN
 if __name__ == '__main__':
     start_sms_monitoring()
     print("""
@@ -3072,4 +3071,5 @@ if __name__ == '__main__':
     ║  SMS Check Interval: 15 seconds      ║
     ╚══════════════════════════════════════╝
     """)
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+    
