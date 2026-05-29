@@ -116,66 +116,211 @@ def owner_required(f):
 # SMS API FETCHING
 def fetch_sms_from_apis():
     all_sms = []
-    apis = [
-        (XPANEL_API_URL, XPANEL_API_TOKEN, 'X PANEL'),
-        (OTP_API_URL, OTP_API_TOKEN, 'OTP'),
-        (OTP_MONITOR_API_URL, OTP_MONITOR_API_TOKEN, 'OTP_MONITOR'),
-        (RESELLER_API_URL, RESELLER_API_TOKEN, 'RESELLER'),
-    ]
-    for url, token, name in apis:
-        try:
-            # CRITICAL: API uses token in URL parameter, NOT Authorization header!
-            full_url = f"{url}?token={token}"
-            response = requests.get(full_url, timeout=10)
 
-            print(f"[API] {name}: URL={full_url[:60]}... Status={response.status_code}")
-
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                except:
-                    print(f"[API] {name}: Invalid JSON response: {response.text[:100]}")
-                    continue
-
-                items = []
-
-                if isinstance(data, list):
-                    items = data
-                elif isinstance(data, dict):
-                    # Try common keys that might contain the SMS list
-                    for key in ['data', 'messages', 'sms', 'items', 'results', 'records']:
-                        if key in data and isinstance(data[key], list):
-                            items = data[key]
-                            break
-                    # If no list found, check if dict itself is a single SMS
-                    if not items and ('num' in data or 'number' in data):
-                        items = [data]
-
-                print(f"[API] {name}: Found {len(items)} items")
-
-                for item in items:
-                    if isinstance(item, dict):
-                        # API uses "num" not "number" !!!
-                        number = str(item.get('num', item.get('number', ''))).strip()
-                        message = str(item.get('message', item.get('text', item.get('body', '')))).strip()
-                        # API uses "dt" for datetime
-                        time_str = item.get('dt', datetime.now().isoformat())
-
-                        if number and message:
-                            all_sms.append({
-                                'number': number,
-                                'message': message,
-                                'api': name,
-                                'time': time_str
-                            })
-                            print(f"[SMS] {name}: {number[:12]}... -> {message[:40]}...")
-            else:
-                print(f"[API] {name}: HTTP {response.status_code} - {response.text[:100]}")
-        except Exception as e: 
-            print(f'[API] {name} Error: {e}')
+    # Fetch from each API using its specific handler
+    all_sms.extend(fetch_xpanel_api())
+    all_sms.extend(fetch_otp_api())
+    all_sms.extend(fetch_otp_monitor_api())
+    all_sms.extend(fetch_reseller_api())
 
     print(f"[SMS Monitor] Total fetched: {len(all_sms)} SMS")
     return all_sms
+
+
+# ====== API 1: X PANEL ======
+# Format: Array of Objects with keys: num, message, dt
+def fetch_xpanel_api():
+    sms_list = []
+    try:
+        full_url = f"{XPANEL_API_URL}?token={XPANEL_API_TOKEN}"
+        response = requests.get(full_url, timeout=10)
+        print(f"[API] X PANEL: Status={response.status_code}")
+
+        if response.status_code == 200:
+            data = response.json()
+            items = []
+
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                for key in ['data', 'messages', 'sms', 'items', 'results', 'records']:
+                    if key in data and isinstance(data[key], list):
+                        items = data[key]
+                        break
+                if not items and ('num' in data or 'number' in data):
+                    items = [data]
+
+            print(f"[API] X PANEL: Found {len(items)} items")
+
+            for item in items:
+                if isinstance(item, dict):
+                    number = str(item.get('num', item.get('number', ''))).strip()
+                    message = str(item.get('message', item.get('text', item.get('body', '')))).strip()
+                    time_str = item.get('dt', datetime.now().isoformat())
+
+                    if number and message:
+                        sms_list.append({
+                            'number': number,
+                            'message': message,
+                            'api': 'X PANEL',
+                            'time': time_str
+                        })
+                        print(f"[SMS] X PANEL: {number[:12]}... -> {message[:40]}...")
+    except Exception as e:
+        print(f'[API] X PANEL Error: {e}')
+
+    return sms_list
+
+
+# ====== API 2: OTP ======
+# Format: Array of Arrays [app_name, number, message, datetime]
+def fetch_otp_api():
+    sms_list = []
+    try:
+        full_url = f"{OTP_API_URL}?token={OTP_API_TOKEN}"
+        response = requests.get(full_url, timeout=10)
+        print(f"[API] OTP: Status={response.status_code}")
+
+        if response.status_code == 200:
+            data = response.json()
+            items = []
+
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                for key in ['data', 'messages', 'sms', 'items', 'results', 'records']:
+                    if key in data and isinstance(data[key], list):
+                        items = data[key]
+                        break
+
+            print(f"[API] OTP: Found {len(items)} items")
+
+            for item in items:
+                # OTP API returns Array format: [app_name, number, message, datetime]
+                if isinstance(item, list) and len(item) >= 4:
+                    app_name = str(item[0]).strip() if len(item) > 0 else 'OTP'
+                    number = str(item[1]).strip() if len(item) > 1 else ''
+                    message = str(item[2]).strip() if len(item) > 2 else ''
+                    time_str = str(item[3]).strip() if len(item) > 3 else datetime.now().isoformat()
+
+                    if number and message:
+                        sms_list.append({
+                            'number': number,
+                            'message': message,
+                            'api': app_name,
+                            'time': time_str
+                        })
+                        print(f"[SMS] OTP: {number[:12]}... -> {message[:40]}...")
+
+                # Fallback: Object format
+                elif isinstance(item, dict):
+                    number = str(item.get('num', item.get('number', ''))).strip()
+                    message = str(item.get('message', item.get('text', item.get('body', '')))).strip()
+                    time_str = item.get('dt', datetime.now().isoformat())
+
+                    if number and message:
+                        sms_list.append({
+                            'number': number,
+                            'message': message,
+                            'api': 'OTP',
+                            'time': time_str
+                        })
+                        print(f"[SMS] OTP: {number[:12]}... -> {message[:40]}...")
+    except Exception as e:
+        print(f'[API] OTP Error: {e}')
+
+    return sms_list
+
+
+# ====== API 3: OTP MONITOR ======
+# Format: Array of Objects with keys: num, message, dt
+def fetch_otp_monitor_api():
+    sms_list = []
+    try:
+        full_url = f"{OTP_MONITOR_API_URL}?token={OTP_MONITOR_API_TOKEN}"
+        response = requests.get(full_url, timeout=10)
+        print(f"[API] OTP_MONITOR: Status={response.status_code}")
+
+        if response.status_code == 200:
+            data = response.json()
+            items = []
+
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                for key in ['data', 'messages', 'sms', 'items', 'results', 'records']:
+                    if key in data and isinstance(data[key], list):
+                        items = data[key]
+                        break
+                if not items and ('num' in data or 'number' in data):
+                    items = [data]
+
+            print(f"[API] OTP_MONITOR: Found {len(items)} items")
+
+            for item in items:
+                if isinstance(item, dict):
+                    number = str(item.get('num', item.get('number', ''))).strip()
+                    message = str(item.get('message', item.get('text', item.get('body', '')))).strip()
+                    time_str = item.get('dt', datetime.now().isoformat())
+
+                    if number and message:
+                        sms_list.append({
+                            'number': number,
+                            'message': message,
+                            'api': 'OTP_MONITOR',
+                            'time': time_str
+                        })
+                        print(f"[SMS] OTP_MONITOR: {number[:12]}... -> {message[:40]}...")
+    except Exception as e:
+        print(f'[API] OTP_MONITOR Error: {e}')
+
+    return sms_list
+
+
+# ====== API 4: RESELLER ======
+# Format: Array of Objects with keys: num, message, dt
+def fetch_reseller_api():
+    sms_list = []
+    try:
+        full_url = f"{RESELLER_API_URL}?token={RESELLER_API_TOKEN}"
+        response = requests.get(full_url, timeout=10)
+        print(f"[API] RESELLER: Status={response.status_code}")
+
+        if response.status_code == 200:
+            data = response.json()
+            items = []
+
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                for key in ['data', 'messages', 'sms', 'items', 'results', 'records']:
+                    if key in data and isinstance(data[key], list):
+                        items = data[key]
+                        break
+                if not items and ('num' in data or 'number' in data):
+                    items = [data]
+
+            print(f"[API] RESELLER: Found {len(items)} items")
+
+            for item in items:
+                if isinstance(item, dict):
+                    number = str(item.get('num', item.get('number', ''))).strip()
+                    message = str(item.get('message', item.get('text', item.get('body', '')))).strip()
+                    time_str = item.get('dt', datetime.now().isoformat())
+
+                    if number and message:
+                        sms_list.append({
+                            'number': number,
+                            'message': message,
+                            'api': 'RESELLER',
+                            'time': time_str
+                        })
+                        print(f"[SMS] RESELLER: {number[:12]}... -> {message[:40]}...")
+    except Exception as e:
+        print(f'[API] RESELLER Error: {e}')
+
+    return sms_list
+
 
 def mask_number(phone):
     if len(phone) >= 10: return phone[:6] + 'XXXXX' + phone[-3:]
